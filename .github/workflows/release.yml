@@ -1,0 +1,82 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Cargo.toml'
+      - 'src/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Get package metadata
+        id: meta
+        run: |
+          META=$(cargo metadata --no-deps --format-version 1)
+          echo "version=$(echo \"$META\" | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
+          echo "name=$(echo \"$META\" | jq -r '.packages[0].name')" >> $GITHUB_OUTPUT
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Ensure tag exists
+        run: |
+          TAG=v${{ steps.meta.outputs.version }}
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG exists"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.meta.outputs.version }}
+          name: v${{ steps.meta.outputs.version }}
+          body: Release ${{ steps.meta.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/release/${{ steps.meta.outputs.name }}
+          asset_name: ${{ steps.meta.outputs.name }}-v${{ steps.meta.outputs.version }}-${{ runner.os }}-x86_64
+          asset_content_type: application/octet-stream
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "No CARGO_REGISTRY_TOKEN secret set; skipping publish"
+            exit 0
+          fi
+          echo "Publishing version ${{ steps.meta.outputs.version }} to crates.io"
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"
