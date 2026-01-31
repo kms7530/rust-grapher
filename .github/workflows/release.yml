@@ -26,6 +26,11 @@ jobs:
           toolchain: stable
           profile: minimal
 
+      - name: Install jq (for metadata parsing)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
       - name: Get package metadata
         id: meta
         run: |
@@ -35,6 +40,29 @@ jobs:
 
       - name: Build release
         run: cargo build --release
+
+      - name: Debug build outputs
+        run: |
+          echo "meta name=${{ steps.meta.outputs.name }} version=${{ steps.meta.outputs.version }}"
+          ls -la target/release || true
+
+      - name: Find release asset
+        id: find_asset
+        run: |
+          echo "Looking for built artifact..."
+          ls -la target/release
+          NAME="${{ steps.meta.outputs.name }}"
+          if [ -n "$NAME" ] && [ -f "target/release/$NAME" ]; then
+            ASSET="target/release/$NAME"
+          else
+            ASSET=$(find target/release -maxdepth 1 -type f -perm -111 -print | head -n1 || true)
+          fi
+          if [ -z "$ASSET" ]; then
+            echo "No release artifact found in target/release" >&2
+            exit 1
+          fi
+          echo "asset_path=$ASSET" >> $GITHUB_OUTPUT
+          echo "asset_name=$(basename \"$ASSET\")" >> $GITHUB_OUTPUT
 
       - name: Ensure tag exists
         run: |
@@ -66,8 +94,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/release/${{ steps.meta.outputs.name }}
-          asset_name: ${{ steps.meta.outputs.name }}-v${{ steps.meta.outputs.version }}-${{ runner.os }}-x86_64
+          asset_path: ${{ steps.find_asset.outputs.asset_path }}
+          asset_name: ${{ steps.find_asset.outputs.asset_name }}-v${{ steps.meta.outputs.version }}-${{ runner.os }}-x86_64
           asset_content_type: application/octet-stream
 
       - name: Publish to crates.io
