@@ -3,6 +3,9 @@ name = "rust-grapher"
 version = "0.1.0"
 edition = "2021"
 description = "Generate mermaid dependency graphs for Rust projects"
+license = "MIT"
+repository = "https://github.com/kms7530/rust-grapher"
+homepage = "https://github.com/kms7530/rust-grapher"
 
 [dependencies]
 cargo_metadata = "0.23"
